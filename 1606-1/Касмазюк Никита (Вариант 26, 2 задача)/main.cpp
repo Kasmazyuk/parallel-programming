@@ -1,169 +1,277 @@
-#include "stdio.h"
 #include "mpi.h"
-#include "fstream"
-double startT, stopT;
-
-
-int* mergeArrays (int* v1, int n1, int* v2, int n2)
-{
-	int i, j, k;
-	int* result;
-
-	result = new int[n1 + n2];
-	i = 0;
-	j = 0;
-	k = 0;
-
-	while (i < n1 && j < n2)
-		if (v1[i] < v2[j])
-		{
-			result[k] = v1[i];
-			i++;
-			k++;
-		} 
-		else 
-		{
-		   result[k] = v2[j];
-		   j++;
-		   k++;
-		}
-
-	if (i == n1)
-		while (j < n2) 
-		{
-			result[k] = v2[j];
-			j++;
-			k++;
-		}
-	if(j == n2)
-		while (i < n1) 
-		{
-			result[k] = v1[i];
-			i++;
-			k++;
-		}
-
-	return result;
-}
-
-void swap (int* v, int i, int j)
-{
-	 int t;
-	 t = v[i];
-	 v[i] = v[j];
-	 v[j] = t;
-}
-
-void sort (int* v, int n)
-{
-	int i, j;
-
-	for (i = n - 2; i >= 0; i--)
-		for (j = 0; j <= i; j++)
-			if (v[j] > v[j + 1])
-			swap (v, j, j + 1);
-}
+#include <stdio.h>
+#include <stdlib.h>
 
 using namespace std;
 
-void main (int argc, char ** argv)
+
+int* parallelSortBubble;
+double serialStart;
+double serialTotalTime;
+double parallelStart;
+double parallelTotalTime;
+
+void generateData(int*& myArray, int arraySize, int seed)
 {
-	int* data;            
-	int* res_arr; 
-	int* sub;
+    if(myArray!=0)
+    {
+        delete[] myArray;
+    }
+    myArray=new int[arraySize];
 
-	int m, n;
-	int ProcNum, ProcRank;
-	int r;
-	int s;
-	int i;
-	int move;
-	MPI_Status status;
+    srand(seed);
+    for(int i=0;i<arraySize;i++)
+    {
+        myArray[i]=rand()%100;
+    }
+}
 
-	MPI_Init (&argc, &argv);
-	MPI_Comm_rank (MPI_COMM_WORLD, &ProcNum);
-	MPI_Comm_size (MPI_COMM_WORLD, &ProcRank);
+void bubbleSort(int* a, int size)
+{
+    for(int i=0; i < size; i++)
+    {
+        for(int j = size-1; j > i; j-- )
+        {
+            if ( a[j-1] > a[j] )
+            {
+                int x;
+                x=a[j-1];
+                a[j-1]=a[j];
+                a[j]=x;
+            }
+        }
+    }
+}
 
-	if (ProcNum == 0) {
-		n = 6000;
-		s = n / ProcRank;
-		r = n % ProcRank;
-		//printf("\n S: %i", ProcRank);
-		//printf("\n R: %i", r);
-		data = new int[n + ProcRank - r];
-  
-	srand(unsigned int(MPI_Wtime()));
-	for(i = 0; i < n; i++)
-		data[i] = rand() % 1500;
+void merge(int* &mergeArray, int* a1, int size1, int* a2, int size2)
+{
+    if(mergeArray!=0)
+        delete[] mergeArray;
+    mergeArray=new int[size1+size2];
 
-	if (r != 0) {
-		for (i = n; i < n + ProcRank - r; i++)
-		data[i] = 0;
+    int i,j,k;
+    i=j=k=0;
+    while(i<size1 && j<size2)
+    {
+        if(a1[i]<a2[j])
+        {
+            mergeArray[k]=a1[i];
+            i++;
+        }
+        else
+        {
+            mergeArray[k]=a2[j];
+            j++;
+        }
+        k++;
+    }
+    if(i==size1)
+    {
+        while(j<size2)
+        {
+            mergeArray[k]=a2[j];
+            j++;
+            k++;
+        }
+    }
+    if(j==size2)
+    {
+        while(i<size1)
+        {
+            mergeArray[k]=a1[i];
+            i++;
+            k++;
+        }
+    }
+}
+void exchangeArray(int ProcRank, int anotherProcRank, int& blockSize, int* & array)
+{
+    MPI_Status Status;
+    MPI_Send(&blockSize,1,MPI_INT,anotherProcRank,0,MPI_COMM_WORLD);
+    MPI_Send(array, blockSize, MPI_INT, anotherProcRank, 0, MPI_COMM_WORLD);
+    int anotherProcBlockSize;
 
-	//s = s + 1;
-	}
-	//
-	startT = MPI_Wtime();                                 
-	MPI_Bcast (&s, 1, MPI_INT, 0, MPI_COMM_WORLD);
-	res_arr = new int[s]; 
-	MPI_Scatter (data, s, MPI_INT, res_arr, s, MPI_INT, 0, MPI_COMM_WORLD);
-	sort (res_arr, s);
-  } 
+    MPI_Recv(&anotherProcBlockSize, 1, MPI_INT, anotherProcRank, 0, MPI_COMM_WORLD, &Status);
+    int* anotherProcArray=new int[anotherProcBlockSize];
+    MPI_Recv(anotherProcArray, anotherProcBlockSize, MPI_INT, anotherProcRank, 0, MPI_COMM_WORLD, &Status);
 
-	else 
-	{
-		MPI_Bcast (&s, 1, MPI_INT, 0, MPI_COMM_WORLD);
-		res_arr = new int[s];
-		MPI_Scatter (data, s, MPI_INT, res_arr, s, MPI_INT, 0, MPI_COMM_WORLD);
-		sort (res_arr, s); 
-	}
+    int* mergeArray=0;
 
-	move = 1;
+    merge(mergeArray,array,blockSize, anotherProcArray, anotherProcBlockSize);
+    int newBlockSize=(blockSize+anotherProcBlockSize)/2;
+    if(array!=0)
+        delete [] array;
+    if(ProcRank<anotherProcRank)
+    {
+        array=new int[newBlockSize];
+        for(int i=0;i<newBlockSize;i++)
+        {
+            array[i]=mergeArray[i];
+        }
+        blockSize=newBlockSize;
+    }
+    else
+    {
+        array=new int[blockSize+anotherProcBlockSize-newBlockSize];
+        for(int i=0;i<blockSize+anotherProcBlockSize-newBlockSize;i++)
+        {
+            array[i]=mergeArray[i+newBlockSize];
+        }
+        blockSize=blockSize+anotherProcBlockSize-newBlockSize;
+    }
 
-	while (move < ProcRank) {
-		if (ProcNum%(2*move)==0) {
-			if (ProcNum + move < ProcRank) {                     
-				MPI_Recv (&m, 1, MPI_INT, ProcNum + move, 0, MPI_COMM_WORLD, &status);
-				sub = new int [m]; 
-				MPI_Recv (sub, m, MPI_INT, ProcNum + move, 0, MPI_COMM_WORLD, &status);
-				res_arr = mergeArrays (res_arr, s, sub, m);
-				s = s + m;
-			}
-		} 
+    delete [] anotherProcArray;
+    delete [] mergeArray;
+}
+int main(int argc, char *argv[])
+{
 
-	else 
-	{ 
-		int near = ProcNum - move;
-		MPI_Send (&s, 1, MPI_INT, near, 0, MPI_COMM_WORLD);
-		MPI_Send (res_arr, s, MPI_INT, near, 0, MPI_COMM_WORLD);
-		break;
-	}
+    int arraySize=atoi(argv[1]);
+    int seed=atoi(argv[2]);
 
-	move = move * 2;
-	}
+    int procBlockSize=0;
+    int* procArray=0;
+	int* myArray=0;
 
-	if (ProcNum == 0) {
-		stopT = MPI_Wtime();
+    int ProcRank, ProcNum;
+    MPI_Status Status;
 
-		double parallelTime = stopT- startT;
-		printf("\n\nTime par: %f", parallelTime);
+    MPI_Init(&argc,&argv);
+    MPI_Comm_size(MPI_COMM_WORLD,&ProcNum);
+    MPI_Comm_rank(MPI_COMM_WORLD,&ProcRank);
+   
 
-  
-		//startT = MPI_Wtime();
-		//sort(data,n);
-		//stopT = MPI_Wtime();
+    if(ProcRank==0)
+    {
+       // int* myArray=0;
 
-		//printf("\nTime pos: %f", stopT - startT);
+        generateData(myArray, arraySize, seed);
 
-	//ofstream file("output.txt");
-	//for(i = 0; i < n; i++)
-	//{
-	//	file << res_arr[i] << " ";
-	//}
+        parallelStart=MPI_Wtime();
+        int blockSize=arraySize/ProcNum;
+        for(int i=1; i<ProcNum-1;i++)
+        {
+            int start=blockSize*i;
+            MPI_Send(&blockSize,1,MPI_INT,i,0,MPI_COMM_WORLD);
+            MPI_Send(myArray+start, blockSize, MPI_INT, i, 0, MPI_COMM_WORLD);
+        }
 
-	//file.close();
+        if(ProcNum>1)
+        {
+            int start=blockSize*(ProcNum-1);
+            int end=arraySize;
+            int lastBlockSize=end-start;
+            MPI_Send(&lastBlockSize,1,MPI_INT,ProcNum-1,0,MPI_COMM_WORLD);
+            MPI_Send(myArray+start, lastBlockSize, MPI_INT, ProcNum-1, 0, MPI_COMM_WORLD);
+        }
+        procBlockSize=blockSize;
+        procArray=new int[procBlockSize];
+        for(int i=0;i<procBlockSize;i++)
+        {
+            procArray[i]=myArray[i];
+        }
 
-	}
+      
+    }
 
-	MPI_Finalize (); 
+    if(ProcRank!=0)
+    {
+        MPI_Recv(&procBlockSize, 1, MPI_INT, 0, 0, MPI_COMM_WORLD, &Status);
+        procArray=new int[procBlockSize];
+        MPI_Recv(procArray, procBlockSize, MPI_INT, 0, 0, MPI_COMM_WORLD, &Status);
+    }
+
+    bubbleSort(procArray,procBlockSize);
+
+    for (int i = 0; i < ProcNum; i++ )
+    {
+        if (i % 2 == 1)
+        {
+            if (ProcRank % 2 == 1)
+            {
+                if (ProcRank < ProcNum - 1)
+                {
+                    exchangeArray(ProcRank,ProcRank+1,procBlockSize, procArray);
+
+                }
+            }
+            else
+            {
+                if (ProcRank > 0)
+                {
+                    exchangeArray(ProcRank,ProcRank-1,procBlockSize, procArray);
+                }
+            }
+        }
+        else
+        {
+            if(ProcRank % 2 == 0)
+            {
+                if (ProcRank < ProcNum - 1)
+                {
+                    exchangeArray(ProcRank,ProcRank+1,procBlockSize, procArray);
+                }
+            }
+            else
+            {
+                exchangeArray(ProcRank,ProcRank-1,procBlockSize, procArray);
+            }
+        }
+    }
+
+    if(ProcRank!=0)
+    {
+        MPI_Send(&procBlockSize,1,MPI_INT, 0, 0,MPI_COMM_WORLD);
+        MPI_Send(procArray, procBlockSize, MPI_INT, 0, 0, MPI_COMM_WORLD);
+    }
+    if(ProcRank==0)
+    {
+        parallelSortBubble=new int[arraySize];
+        int start=procBlockSize;
+        for(int i=0;i<procBlockSize;i++)
+        {
+            parallelSortBubble[i]=procArray[i];
+        }
+        for(int i=1;i<ProcNum;i++)
+        {
+            int anotherProcBlockSize;
+            MPI_Recv(&anotherProcBlockSize, 1, MPI_INT, i, 0, MPI_COMM_WORLD, &Status);
+            int* anotherProcArray=new int[anotherProcBlockSize];
+            MPI_Recv(anotherProcArray, anotherProcBlockSize, MPI_INT, i, 0, MPI_COMM_WORLD, &Status);
+
+            for(int j=0;j<anotherProcBlockSize;j++)
+            {
+                parallelSortBubble[start+j]=anotherProcArray[j];
+            }
+            start+=anotherProcBlockSize;
+            delete[] anotherProcArray;
+        }
+        parallelTotalTime=MPI_Wtime() - parallelStart;
+        printf("Parallel work time:%f\n", parallelTotalTime);
+    }
+
+	
+
+    if(ProcRank==0)
+    {       
+
+      //  generateData(serialSortBubble, arraySize, seed);
+
+        serialStart=MPI_Wtime();
+        bubbleSort(myArray,arraySize);
+        serialTotalTime=MPI_Wtime()-serialStart;
+
+
+        printf("Posled work time:%f\n", serialTotalTime);
+
+		printf("Parallel version acceleration:%f\n", serialTotalTime/parallelTotalTime);
+   
+
+
+        delete [] parallelSortBubble;
+		delete [] myArray;
+    }
+
+    MPI_Finalize();
+    return 0;
 }
