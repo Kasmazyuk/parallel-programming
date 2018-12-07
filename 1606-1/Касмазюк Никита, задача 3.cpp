@@ -78,7 +78,7 @@ double* Sub(double* matrix1, double* matrix2, int N){
 	return Rez;
 }
 
-double* Sub(double* matrix1, double* matrix2, double* matrix3, double* matrix4, int N){//сумма 3-х матриц вычесть четвертую
+double* Sub(double* matrix1, double* matrix2, double* matrix3, double* matrix4, int N){//Г±ГіГ¬Г¬Г  3-Гµ Г¬Г ГІГ°ГЁГ¶ ГўГ»Г·ГҐГ±ГІГј Г·ГҐГІГўГҐГ°ГІГіГѕ
 	double* Rez = new double[N*N];
 
 	for (int i = 0; i < N; i++)
@@ -228,7 +228,7 @@ int main(int argc, char** argv){
 		}
 	
 
-			// алгоритм
+			// Г Г«ГЈГ®Г°ГЁГІГ¬
 		StartParAlg = MPI_Wtime();
 
 		sqr = (int)sqrt((double)ProcSize), new_N = N/sqr;
@@ -330,7 +330,7 @@ int main(int argc, char** argv){
 					matr_Rez_Par[(k/coef)*new_N*N+(k%coef)*new_N+coef*i*new_N+j] = TMP_Rez[0][i*new_N+j];
 		}
 
-		//выводы
+		//ГўГ»ГўГ®Г¤Г»
 
 		EndParAlg = MPI_Wtime();
 		TimeParAlg = EndParAlg - StartParAlg;
